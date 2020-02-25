@@ -1,0 +1,11 @@
+from bs4 import BeautifulSoup
+import requests
+
+# Need to assign the page number to scrape
+page = requests.get('http://www.equinediseasecc.org/alerts/filter', data='__RequestVerificationToken=H4N_qQFrMDxOU57dbZxfPc_Uu2uxmWMd9MNaSSY7phet0mQHT3ThqwCK6JB-F0xH-h4nUK1uhFI-GH_3ijYffbexoAg1&Disease=&State=&StartDate=&EndDate=&tableP=2&X-Requested-With=XMLHttpRequest')
+soup = BeautifulSoup(page.text, 'html.parser')
+
+# convert this text into a data transform object (dto)
+print(soup.find('div', {'class': 'outbreaktable'}).text)
+
+# To Do: Save the dto to database
