@@ -1,11 +1,87 @@
 from bs4 import BeautifulSoup
 import requests
+import re
 
-# Need to assign the page number to scrape
-page = requests.get('http://www.equinediseasecc.org/alerts/filter', data='__RequestVerificationToken=H4N_qQFrMDxOU57dbZxfPc_Uu2uxmWMd9MNaSSY7phet0mQHT3ThqwCK6JB-F0xH-h4nUK1uhFI-GH_3ijYffbexoAg1&Disease=&State=&StartDate=&EndDate=&tableP=2&X-Requested-With=XMLHttpRequest')
-soup = BeautifulSoup(page.text, 'html.parser')
 
-# convert this text into a data transform object (dto)
-print(soup.find('div', {'class': 'outbreaktable'}).text)
+def grab_field_and_replace(field_regex, text):
+    '''
+    This grabs the matching regular expression and removes it from the text.
+    returns tuple(match, text)
+    '''
 
-# To Do: Save the dto to database
+    field = re.search(field_regex, text)
+    if (field == None):
+        return (None, text)
+
+    match = field.group(0)
+    return (match, text.replace(match, '', 1))
+
+# Tells what the number of pages that need to be scraped is.
+PAGE_MAX = 153
+
+for page in range(PAGE_MAX):
+    page = requests.get('http://www.equinediseasecc.org/alerts/filter', data='__RequestVerificationToken=H4N_qQFrMDxOU57dbZxfPc_Uu2uxmWMd9MNaSSY7phet0mQHT3ThqwCK6JB-F0xH-h4nUK1uhFI-GH_3ijYffbexoAg1&Disease=&State=&StartDate=&EndDate=&tableP={}&X-Requested-With=XMLHttpRequest'.format(page))
+    soup = BeautifulSoup(page.text, 'html.parser')
+    # This text will be converted into a Dto
+    page_text = soup.find('div', {'class': 'outbreaktable'}).text
+    raw_cases = re.split('Notes:(.?)*;', page_text)
+
+    cases = list()
+    for item in raw_cases:
+        if (item == ''):
+            continue
+
+        text = grab_field_and_replace(r'Alert ID:(.?)*', item)
+        item = text[1]
+        alert = text[0]
+
+        text = grab_field_and_replace(r'[A-Z][a-z]* [\d]{1}[\d]?, [\d]{4}', item)
+        item = text[1]
+        date = text[0]
+
+        text = grab_field_and_replace(r'[A-Z](.?)*\n', item)
+        item = text[1]
+        disease = text[0]
+
+        text = grab_field_and_replace(r'[A-Z](.?)*,', item)
+        item = text[1]
+        county = text[0]
+
+        text = grab_field_and_replace(r'[A-Z]{2}', item)
+        item = text[1]
+        state = text[0]
+
+        text = grab_field_and_replace(r'Confirmed [c|C]ase\(s\): (.?)*', item)
+        item = text[1]
+        quarantine_status = text[0]
+
+        text = grab_field_and_replace(r'Outbreak Identifier: [\d]{3}?[\d]?', item)
+        item = text[1]
+        outbreak_identifier = text[0]
+
+        text = grab_field_and_replace('Source: (.?)*\n', item)
+        item = text[1]
+        text = grab_field_and_replace('[A-Z](.?)*', item)
+        item = text[1]
+        source = text[0]
+
+        text = grab_field_and_replace('Number Confirmed: [\d]*;', item)
+        item = text[1]
+        number_confirmed = text[0]
+
+        # Still need to add num_exposed, age, breed, and additional dates.
+        case = {
+            "id": alert,
+            "date": date,
+            "disease": disease,
+            "county": county,
+            "state": state,
+            "quarantine_status": quarantine_status,
+            "outbreak_identifier": outbreak_identifier,
+            "source": source,
+            "number_confirmed": number_confirmed
+        }
+        cases.append(case)
+
+    
+    # Still need to save the Dto to database for querying and analytics.
