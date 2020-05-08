@@ -200,5 +200,3 @@ for page_num in range(1, PAGE_MAX):
         finally:
             cursor.close()
 
-        print("hello")
-© Gitea Version: 1.9.6+1-g3c3823dc7 Page: 13ms Template: 1ms English JavaScript licenses API Website Go1.12.13
