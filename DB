@@ -1,79 +1,204 @@
-CREATE DATABASE ahenke;
+from bs4 import BeautifulSoup
+from dateutil import parser
+import requests
+import re
+import mysql.connector
 
-USE ahenke;
+cnx = mysql.connector.connect(user='ahenke',
+                              password='[omitted]',
+                              host='localhost',
+                              port=3306)
 
-CREATE TABLE illness (
-    illness_id INT AUTO_INCREMENT PRIMARY KEY,
-    name NVARCHAR(30) NOT NULL,
-    symptoms NVARCHAR(255),
-    contagious BIT
-);
+def create_database_schema():
+    DB_NAME = 'ahenke'
+    TABLES = {}
+    TABLES['illness'] = (
+        "CREATE TABLE illness ("
+        "   id INT AUTO_INCREMENT PRIMARY KEY,"
+        "   name NVARCHAR(255) NOT NULL,"
+        "   symptoms NVARCHAR(255),"
+        "   contagious BIT)"
+    )
+    TABLES['location'] = (
+        "CREATE TABLE location ("
+        "   id INT AUTO_INCREMENT PRIMARY KEY,"
+        "   county_name NVARCHAR(128) NOT NULL,"
+        "   state_name NVARCHAR(128) NOT NULL)"
+    )
+    TABLES['instance'] = (
+        "CREATE TABLE instance ("
+        "   id INT PRIMARY KEY,"
+        "   number_involved INT,"
+        "   location_id INT,"
+        "   illness_id INT,"
+        "   start_date DATETIME,"
+        "   quarantine_status NVARCHAR(255),"
+        "   outbreak_identifier NVARCHAR(255),"
+        "   source NVARCHAR(255),"
+        "   FOREIGN KEY (location_id) REFERENCES location(id),"
+        "   FOREIGN KEY (illness_id) REFERENCES illness(id))"
+    )
 
-CREATE TABLE location (
-    location_id INT AUTO_INCREMENT PRIMARY KEY,
-    county_name NCHAR(128) NOT NULL
-    state_name NCHAR(128) NOT NULL
-);
+    try:
+        cursor = cnx.cursor()
+        cursor.execute("CREATE DATABASE {}".format(DB_NAME))
+        cursor.execute("USE {}".format(DB_NAME))
+        for table_name in TABLES:
+            table_descr = TABLES[table_name]
+            cursor.execute(table_descr)
+    except mysql.connector.Error as err:
+        cursor.execute("DROP DATABASE {}".format(DB_NAME))
+        print("Failed creating db: {}".format(err))
+        exit(1)
 
-INSERT INTO state(state_code, state_name) VALUES
-('AK', 'Alaska'),
-('AL', 'Alabama'),
-('AZ', 'Arizona'),
-('AR', 'Arkansas'),
-('CA', 'California'),
-('CO', 'Colorado'),
-('CT', 'Connecticut'),
-('DE', 'Delaware'),
-('DC', 'District of Columbia'),
-('FL', 'Florida'),
-('GA', 'Georgia'),
-('HI', 'Hawaii'),
-('ID', 'Idaho'),
-('IL', 'Illinois'),
-('IN', 'Indiana'),
-('IA', 'Iowa'),
-('KS', 'Kansas'),
-('KY', 'Kentucky'),
-('LA', 'Louisiana'),
-('ME', 'Maine'),
-('MD', 'Maryland'),
-('MA', 'Massachusetts'),
-('MI', 'Michigan'),
-('MN', 'Minnesota'),
-('MS', 'Mississippi'),
-('MO', 'Missouri'),
-('MT', 'Montana'),
-('NE', 'Nebraska'),
-('NV', 'Nevada'),
-('NH', 'New Hampshire'),
-('NJ', 'New Jersey'),
-('NM', 'New Mexico'),
-('NY', 'New York'),
-('NC', 'North Carolina'),
-('ND', 'North Dakota'),
-('OH', 'Ohio'),
-('OK', 'Oklahoma'),
-('OR', 'Oregon'),
-('PA', 'Pennsylvania'),
-('PR', 'Puerto Rico'),
-('RI', 'Rhode Island'),
-('SC', 'South Carolina'),
-('SD', 'South Dakota'),
-('TN', 'Tennessee'),
-('TX', 'Texas'),
-('UT', 'Utah'),
-('VT', 'Vermont'),
-('VA', 'Virginia'),
-('WA', 'Washington'),
-('WV', 'West Virginia'),
-('WI', 'Wisconsin'),
-('WY', 'Wyoming');
+DISEASES = {
+    "Equine Infectious Anemia",
+    "Strangles",
+    "Vesicular Stomatitis",
+    "Equine Herpesvirus- Neurologic",
+    "Eastern Equine Encephalitis",
+    "Equine Herpesvirus- Respiratory",
+    "Equine Influenza",
+    "Equine Herpesvirus- Abortion",
+    "Corona Virus",
+    "West Nile Virus",
+    "Potomac Horse Fever",
+    "Anthrax",
+    "Rabies",
+    "Piroplasmosis"
+}
 
-CREATE TABLE instance (
-    instance_id INT NOT NULL PRIMARY KEY,
-    number_involved INT,
-    start_date DATETIME,
-    end_date DATETIME,
-    FOREIGN KEY (location_id) REFERENCES location(id),
-    FOREIGN KEY (illness_id) REFERENCES illness(id),
-);
+def grab_field_and_replace(field_regex, text):
+    '''
+    Grab the matching regular expression and remove it
+    from the text.
+    @return tuple(match, text)
+    '''
+
+    field = re.search(field_regex, text)
+    if (field == None):
+        return (None, text)
+
+    match = field.group(0)
+    return (match, text.replace(match, '', 1))
+
+#max page for scrape
+PAGE_MAX = 152
+
+create_database_schema()
+
+
+
+for page_num in range(1, PAGE_MAX):
+    data_string = '__RequestVerificationToken=H4N_qQFrMDxOU57dbZxfPc_Uu2uxmWMd9MNaSSY7phet0mQHT3ThqwCK6JB-F0xH-h4nUK1uhFI-GH_3ijYffbexoAg1&Disease=&State=&StartDate=&EndDate=&tableP={}&X-Requested-With=XMLHttpRequest'.format(page_num)
+    page = requests.get('http://www.equinediseasecc.org/alerts/filter?{}'.format(data_string))
+    soup = BeautifulSoup(page.text, 'html.parser')
+    # convert this text into a Dto
+    page_text = soup.find_all('div', {'class': 'col-md-12'})[1].text
+    raw_cases = re.split('Notes:(.?)*;', page_text)
+
+    cases = list()
+    for item in raw_cases:
+        if (item == ''):
+            continue
+
+        cursor = cnx.cursor()
+        cursor.execute("USE ahenke")
+        try:
+            text = grab_field_and_replace(r'Alert ID:(.?)*', item)
+            item = text[1]
+            alert = text[0]
+
+            text = grab_field_and_replace(r'[A-Z][a-z]* [\d]{1}[\d]?, [\d]{4}', item)
+            item = text[1]
+            date = text[0]
+
+            text = grab_field_and_replace(r'[A-Z](.?)*\n', item)
+            item = text[1]
+            disease = text[0]
+
+            text = grab_field_and_replace(r'[A-Z](.?)*,', item)
+            item = text[1]
+            county = text[0]
+
+            text = grab_field_and_replace(r'[A-Z]{2}', item)
+            item = text[1]
+            state = text[0]
+
+            text = grab_field_and_replace(r'Confirmed [c|C]ase\(s\): (.?)*', item)
+            item = text[1]
+            quarantine_status = text[0]
+
+            text = grab_field_and_replace(r'Outbreak Identifier: [\d]{3}?[\d]?', item)
+            item = text[1]
+            outbreak_identifier = text[0]
+
+            text = grab_field_and_replace('Source: (.?)*\n', item)
+            item = text[1]
+            text = grab_field_and_replace('[A-Z](.?)*', item)
+            item = text[1]
+            source = text[0]
+
+            text = grab_field_and_replace('Number Confirmed: [\d]*;', item)
+            item = text[1]
+            number_confirmed = text[0]
+
+            insert_illness = ("INSERT INTO illness "
+                              "(name) "
+                              "VALUES (%(name)s)")
+
+            insert_location = ("INSERT INTO location "
+                               "(county_name, state_name) "
+                               "VALUES (%(county)s, %(state)s)")
+
+            insert_instance = ("INSERT INTO instance "
+                               "(id, number_involved, location_id, illness_id, start_date,"
+                               "quarantine_status, outbreak_identifier, source)"
+                               "VALUES (%(id)s, %(quantity)s, %(location_id)s,"
+                               "%(illness_id)s, %(date)s, %(status)s, %(identifier)s, %(source)s)")
+
+            # check if illness is created
+            illness_query = ("SELECT id, name FROM illness WHERE name = %(name)s")
+            illness = {
+                "name": disease.rstrip() if disease.rstrip() in DISEASES else "Other"
+            }
+            cursor.execute(illness_query, illness)
+            results = cursor.fetchall()
+            if (cursor.rowcount == 0):
+                cursor.execute(insert_illness, illness)
+                illness_id = cursor.lastrowid
+            else:
+                illness_id = results[0][0]
+
+            location_query = ("SELECT id, county_name, state_name FROM location WHERE county_name = %(county)s AND state_name = %(state)s")
+            location = {
+                "county": county.rstrip(","),
+                "state": state.rstrip()
+            }
+            cursor.execute(location_query, location)
+            results = cursor.fetchall()
+            if (cursor.rowcount == 0):
+                cursor.execute(insert_location, location)
+                location_id = cursor.lastrowid
+            else:
+                location_id = results[0][0]
+
+            instance = {
+                "id": int(alert.split(":")[1].rstrip()),
+                "quantity": -1 if number_confirmed is None else int(re.findall(r'\d+', number_confirmed.rstrip())[0]),
+                "location_id": location_id,
+                "illness_id": illness_id,
+                "date": date() if date is None else parser.parse(date.rstrip()),
+                "status": "" if quarantine_status is None else quarantine_status.split(":")[1].rstrip(),
+                "identifier": -1 if outbreak_identifier is None else int(outbreak_identifier.split(":")[1].rstrip()) ,
+                "source": "" if source is None else source.rstrip()
+            }
+            cursor.execute(insert_instance, instance)
+            cnx.commit()
+        except Exception as err:
+            print(err)
+        finally:
+            cursor.close()
+
+        print("hello")
+© Gitea Version: 1.9.6+1-g3c3823dc7 Page: 13ms Template: 1ms English JavaScript licenses API Website Go1.12.13
