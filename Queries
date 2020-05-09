@@ -1,12 +1,17 @@
-#Illnesses in Nebraska after July 9, 2019 
 SELECT name FROM instance JOIN illness i
     ON instance.illness_id = i.id JOIN location l
     ON instance.location_id = l.id
     WHERE state_name = 'NE' AND start_date > '2019-07-09 00:00:00';
-   
-   
-#Illnesses in Nebraska with nasal discharge
+
 SELECT name FROM instance JOIN illness i
     ON instance.illness_id = i.id JOIN location l
     ON instance.location_id = l.id
     WHERE state_name = 'NE' AND (symptoms LIKE '%nasal%' AND symptoms LIKE '%discharge%')
+
+SELECT name, SUM(instance.number_involved) as num_infected FROM instance JOIN illness i
+    ON instance.illness_id = i.id JOIN location l
+    ON instance.location_id = l.id
+    WHERE state_name = 'NE' AND (symptoms LIKE '%nasal%')
+GROUP BY name
+
+SELECT name, SUM(instance.number_involved) as num_infected FROM instance JOIN illness i ON instance.illness_id = i.id JOIN location l ON instance.location_id = l.id WHERE state_name = 'NE' AND symptoms LIKE '%nasal%' GROUP BY name
