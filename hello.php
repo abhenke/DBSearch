@@ -10,6 +10,10 @@ font-size: 24px;
 background-color:gray;
 margin-top:50px;
 }
+table{
+	text-align: center;
+	margin-right:auto;
+	margin-left:auto;
 </style>
 </head>
 <header>
